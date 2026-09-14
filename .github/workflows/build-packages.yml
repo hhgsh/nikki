@@ -14,7 +14,6 @@ jobs:
           - x86_64
         branch:
           - openwrt-25.12
-          - SNAPSHOT
         exclude:
           - arch: mips_4kec
             branch: openwrt-25.12
