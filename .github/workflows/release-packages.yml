@@ -18,7 +18,6 @@ jobs:
           - x86_64
         branch:
           - openwrt-25.12
-          - SNAPSHOT
         exclude:
           - arch: riscv64_riscv64
             branch: openwrt-25.12
