@@ -25,7 +25,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
-      # 1. Go 编译与模块缓存（大幅提速）
+      # 1. Go 编译与模块缓存（提速）
       - name: Setup Go cache
         uses: actions/cache@v4
         with:
@@ -36,27 +36,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-${{ matrix.arch }}-
 
-      - name: Set environment variables
-        run: |
-          echo "GOMAXPROCS=$(nproc)" >> $GITHUB_ENV
-
-      # 2. 执行 OpenWrt SDK 编译
+      # 2. 精准编译指定的项目（去掉了 mihomo-alpha，保留 mihomo-meta、nikki、luci-app-nikki）
       - name: build
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: nikki
-          PACKAGES: mihomo-alpha mihomo-meta nikki luci-app-nikki
+          PACKAGES: mihomo-meta nikki luci-app-nikki
           INDEX: 1
           NO_REFRESH_CHECK: true
           MAKEFLAGS: "-j$(nproc)"
 
-      # 3. 筛选并整理需要发布的文件
+      # 3. 精准筛选并只提取目标 5 个/3 类的 .apk 文件
       - name: Organize Artifacts
         run: |
           mkdir -p output
-          # 搜寻编译出的所有 .apk 包并汇总到 output 目录
-          find bin/packages/ -type f -name "*.apk" -exec cp {} output/ \;
+          find bin/packages/ -type f \( \
+            -name "luci-app-nikki*.apk" -o \
+            -name "luci-i18n-nikki*.apk" -o \
+            -name "mihomo-meta*.apk" -o \
+            -name "nikki*.apk" \
+          \) -exec cp {} output/ \;
           ls -la output/
 
       # 4. 动态生成 Release Tag 名称
@@ -69,7 +69,7 @@ jobs:
             echo "RELEASE_TAG=v25.12-nikki-$(date +'%Y%m%d-%H%M')" >> $GITHUB_ENV
           fi
 
-      # 5. 自动创建 Release 并上传 APK
+      # 5. 自动创建 Release 并只上传指定的 APK
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
