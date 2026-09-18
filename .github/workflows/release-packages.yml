@@ -74,7 +74,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: "Nikki Packages OpenWrt 25.12 (${{ env.RELEASE_TAG }})"
+          name: "Nikki OpenWrt 25.12 (${{ env.RELEASE_TAG }})"
           files: output/*.apk
           generate_release_notes: true
         env:
