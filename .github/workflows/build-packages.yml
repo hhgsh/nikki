@@ -1,12 +1,18 @@
-name: build-packages
+name: biuld-nikki
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 jobs:
-  build:
-    name: ${{ matrix.arch }}-${{ matrix.branch }} build
+  release:
+    name: ${{ matrix.arch }}-${{ matrix.branch }} release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -17,18 +23,50 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
+      # 使用 SDK 官方原生的 ccache/dl 机制进行编译与缓存
       - name: build
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: nikki
-          PACKAGES: mihomo-alpha mihomo-meta nikki luci-app-nikki
+          PACKAGES: mihomo-meta nikki luci-app-nikki
+          INDEX: 1
           NO_REFRESH_CHECK: true
+          # 开启多线程并让 make 记录 ccache
+          MAKEFLAGS: "-j$(nproc)"
+          VARS: "CONFIG_CCACHE=y"
 
-      - name: upload
-        uses: actions/upload-artifact@v7
+      # 精准筛选需要的 5 个 .apk 文件
+      - name: Organize Artifacts
+        run: |
+          mkdir -p output
+          find bin/packages/ -type f \( \
+            -name "luci-app-nikki*.apk" -o \
+            -name "luci-i18n-nikki*.apk" -o \
+            -name "mihomo-meta*.apk" -o \
+            -name "nikki*.apk" \
+          \) -exec cp {} output/ \;
+          ls -la output/
+
+      # 动态生成 Release Tag 名称
+      - name: Generate Release Tag Name
+        id: tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "RELEASE_TAG=${github.ref_name}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_TAG=v25.12-nikki-$(date +'%Y%m%d-%H%M')" >> $GITHUB_ENV
+          fi
+
+      # 自动创建 Release 并上传指定 APK
+      - name: Create GitHub Release and Upload APK
+        uses: softprops/action-gh-release@v2
         with:
-          name: nikki_${{ matrix.arch }}-${{ matrix.branch }}
-          path: bin/packages/${{ matrix.arch }}/nikki
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "Nikki Packages OpenWrt 25.12 (${{ env.RELEASE_TAG }})"
+          files: output/*.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
