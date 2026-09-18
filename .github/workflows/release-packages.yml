@@ -1,9 +1,10 @@
 name: release-packages
+
 on:
   workflow_dispatch:
   push:
     tags:
-      - v*
+      - 'v*'
 
 jobs:
   release:
@@ -20,8 +21,25 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
+      # 1. 缓存 Go 模块与编译缓存（大幅提升 Golang 项目编译速度）
+      - name: Setup Go cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ matrix.arch }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ matrix.arch }}-
+
+      # 2. 预先开启多线程构建环境变量
+      - name: Set environment variables
+        run: |
+          echo "GOMAXPROCS=$(nproc)" >> $GITHUB_ENV
+
+      # 3. 执行编译
       - name: build
         uses: openwrt/gh-action-sdk@main
         env:
@@ -30,13 +48,12 @@ jobs:
           PACKAGES: mihomo-alpha mihomo-meta nikki luci-app-nikki
           INDEX: 1
           NO_REFRESH_CHECK: true
+          # 传递并发编译参数给 SDK
+          MAKEFLAGS: "-j$(nproc)"
 
-      - name: compress
-        run: |
-          tar -c -z -f nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz -C bin/packages/${{ matrix.arch }}/nikki .
-
-      - name: upload
-        uses: actions/upload-artifact@v7
+      # 4. 上传产物
+      - name: Upload Packages
+        uses: actions/upload-artifact@v4
         with:
-          name: nikki_${{ matrix.arch }}-${{ matrix.branch }}
-          path: nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
+          name: nikki-packages-${{ matrix.arch }}-${{ matrix.branch }}
+          path: bin/packages/
