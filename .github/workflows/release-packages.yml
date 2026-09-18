@@ -10,6 +10,8 @@ jobs:
   release:
     name: ${{ matrix.arch }}-${{ matrix.branch }} release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -23,7 +25,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
-      # 1. 缓存 Go 模块与编译缓存（大幅提升 Golang 项目编译速度）
+      # 1. Go 编译与模块缓存（大幅提速）
       - name: Setup Go cache
         uses: actions/cache@v4
         with:
@@ -34,12 +36,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-${{ matrix.arch }}-
 
-      # 2. 预先开启多线程构建环境变量
       - name: Set environment variables
         run: |
           echo "GOMAXPROCS=$(nproc)" >> $GITHUB_ENV
 
-      # 3. 执行编译
+      # 2. 执行 OpenWrt SDK 编译
       - name: build
         uses: openwrt/gh-action-sdk@main
         env:
@@ -48,12 +49,33 @@ jobs:
           PACKAGES: mihomo-alpha mihomo-meta nikki luci-app-nikki
           INDEX: 1
           NO_REFRESH_CHECK: true
-          # 传递并发编译参数给 SDK
           MAKEFLAGS: "-j$(nproc)"
 
-      # 4. 上传产物
-      - name: Upload Packages
-        uses: actions/upload-artifact@v4
+      # 3. 筛选并整理需要发布的文件
+      - name: Organize Artifacts
+        run: |
+          mkdir -p output
+          # 搜寻编译出的所有 .apk 包并汇总到 output 目录
+          find bin/packages/ -type f -name "*.apk" -exec cp {} output/ \;
+          ls -la output/
+
+      # 4. 动态生成 Release Tag 名称
+      - name: Generate Release Tag Name
+        id: tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "RELEASE_TAG=${github.ref_name}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_TAG=v25.12-nikki-$(date +'%Y%m%d-%H%M')" >> $GITHUB_ENV
+          fi
+
+      # 5. 自动创建 Release 并上传 APK
+      - name: Create GitHub Release and Upload APK
+        uses: softprops/action-gh-release@v2
         with:
-          name: nikki-packages-${{ matrix.arch }}-${{ matrix.branch }}
-          path: bin/packages/
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "Nikki Packages OpenWrt 25.12 (${{ env.RELEASE_TAG }})"
+          files: output/*.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
