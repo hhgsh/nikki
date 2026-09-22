@@ -38,9 +38,25 @@ jobs:
         run: |
           tar -c -z -f nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz -C bin/packages/${{ matrix.arch }}/nikki .
 
+      # 生成 Release Tag 名称
+      - name: Set Release Tag
+        id: release_tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # 如果是推送 Tag 触发，直接使用 Git Tag 名称
+            echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            # 如果是手动触发 (workflow_dispatch)，生成带 UTC 时间的版本号
+            echo "tag_name=build-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          fi
+
+      # 验证 Tag 生成是否成功
+      - name: Verify Tag Name
+        run: echo "Generated tag name is ${{ steps.release_tag.outputs.tag_name }}"
+
       - name: upload to release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
           files: nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.release_tag.outputs.tag_name }}
+          generate_release_notes: true
