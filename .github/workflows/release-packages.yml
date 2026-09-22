@@ -1,17 +1,14 @@
 name: release-packages
-
 on:
   workflow_dispatch:
   push:
     tags:
-      - 'v*'
+      - v*
 
 jobs:
   release:
     name: ${{ matrix.arch }}-${{ matrix.branch }} release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -23,54 +20,23 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      # 1. Go 编译与模块缓存（提速）
-      - name: Setup Go cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ matrix.arch }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-${{ matrix.arch }}-
-
-      # 2. 精准编译指定的项目（去掉了 mihomo-alpha，保留 mihomo-meta、nikki、luci-app-nikki）
       - name: build
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: nikki
-          PACKAGES: mihomo-meta nikki luci-app-nikki luci-i18n-nikki-zh-cn
+          PACKAGES: mihomo-alpha mihomo-meta nikki luci-app-nikki
           INDEX: 1
           NO_REFRESH_CHECK: true
-          MAKEFLAGS: "-j$(nproc)"
 
-     # 3. 提取所有编译生成的 .apk 文件
-      - name: Organize Artifacts
+      - name: compress
         run: |
-          mkdir -p output
-          find bin/packages/ -type f -name "*.apk" -exec cp {} output/ \;
-          ls -la output/
+          tar -c -z -f nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz -C bin/packages/${{ matrix.arch }}/nikki .
 
-      # 4. 动态生成 Release Tag 名称
-      - name: Generate Release Tag Name
-        id: tag
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "RELEASE_TAG=${github.ref_name}" >> $GITHUB_ENV
-          else
-            echo "RELEASE_TAG=v25.12-nikki-$(date +'%Y%m%d-%H%M')" >> $GITHUB_ENV
-          fi
-
-      # 5. 自动创建 Release 并只上传指定的 APK
-      - name: Create GitHub Release and Upload APK
-        uses: softprops/action-gh-release@v2
+      - name: upload
+        uses: actions/upload-artifact@v7
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: "Nikki OpenWrt 25.12 (${{ env.RELEASE_TAG }})"
-          files: output/*.apk
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: nikki_${{ matrix.arch }}-${{ matrix.branch }}
+          path: nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
