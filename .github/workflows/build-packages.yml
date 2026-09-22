@@ -1,10 +1,10 @@
-name: biuld-nikki
+name: build nikki
 
 on:
   workflow_dispatch:
   push:
     tags:
-      - 'v*'
+      - v*
 
 jobs:
   release:
@@ -23,50 +23,23 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      # 使用 SDK 官方原生的 ccache/dl 机制进行编译与缓存
       - name: build
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: nikki
-          PACKAGES: mihomo-meta nikki luci-app-nikki
+          PACKAGES: mihomo-alpha mihomo-meta nikki luci-app-nikki
           INDEX: 1
           NO_REFRESH_CHECK: true
-          # 开启多线程并让 make 记录 ccache
-          MAKEFLAGS: "-j$(nproc)"
-          VARS: "CONFIG_CCACHE=y"
 
-      # 精准筛选需要的 5 个 .apk 文件
-      - name: Organize Artifacts
+      - name: compress
         run: |
-          mkdir -p output
-          find bin/packages/ -type f \( \
-            -name "luci-app-nikki*.apk" -o \
-            -name "luci-i18n-nikki*.apk" -o \
-            -name "mihomo-meta*.apk" -o \
-            -name "nikki*.apk" \
-          \) -exec cp {} output/ \;
-          ls -la output/
+          tar -c -z -f nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz -C bin/packages/${{ matrix.arch }}/nikki .
 
-      # 动态生成 Release Tag 名称
-      - name: Generate Release Tag Name
-        id: tag
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "RELEASE_TAG=${github.ref_name}" >> $GITHUB_ENV
-          else
-            echo "RELEASE_TAG=v25.12-nikki-$(date +'%Y%m%d-%H%M')" >> $GITHUB_ENV
-          fi
-
-      # 自动创建 Release 并上传指定 APK
-      - name: Create GitHub Release and Upload APK
+      - name: upload to release
         uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: "Nikki Packages OpenWrt 25.12 (${{ env.RELEASE_TAG }})"
-          files: output/*.apk
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
