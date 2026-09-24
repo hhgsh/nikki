@@ -38,19 +38,21 @@ jobs:
         run: |
           tar -c -z -f nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz -C bin/packages/${{ matrix.arch }}/nikki .
 
-      # 生成 Release Tag 名称
+      # 从编译生成的 package 文件名中动态提取 luci-app-nikki 版本号
       - name: Set Release Tag
         id: release_tag
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            # 如果是推送 Tag 触发，直接使用 Git Tag 名称
-            echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          # 获取生成的 luci-app-nikki 包文件名并解析版本号
+          FILE=$(ls bin/packages/${{ matrix.arch }}/nikki/luci-app-nikki* 2>/dev/null | head -n 1)
+          
+          if [ -n "$FILE" ]; then
+            # 兼容 .ipk 和 .apk 两种文件命名格式
+            VERSION=$(basename "$FILE" | sed -E 's/^luci-app-nikki[_-]//; s/\.(ipk|apk)$//; s/_[^_]+$//')
+            echo "tag_name=v${VERSION}" >> $GITHUB_OUTPUT
           else
-            # 如果是手动触发 (workflow_dispatch)，生成带 UTC 时间的版本号
             echo "tag_name=build-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
           fi
 
-      # 验证 Tag 生成是否成功
       - name: Verify Tag Name
         run: echo "Generated tag name is ${{ steps.release_tag.outputs.tag_name }}"
 
