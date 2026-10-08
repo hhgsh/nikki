@@ -1,0 +1,67 @@
+name: test
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - v*
+
+jobs:
+  release:
+    name: ${{ matrix.arch }}-${{ matrix.branch }} release
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - x86_64
+        branch:
+          - openwrt-25.12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 1. 设置 Go 环境与构建缓存
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+
+      # 2. 显式缓存 OpenWrt SDK 下载目录及 Go 缓存路径
+      - name: Cache Go Build & SDK Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/.openwrt-sdk
+          key: ${{ runner.os }}-openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-${{ hashFiles('**/Makefile', '**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-
+
+      # 3. 使用 SDK 编译 IPK
+      - name: Build Packages
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
+          FEEDNAME: nikki
+          PACKAGES: mihomo-alpha mihomo-meta nikki luci-app-nikki
+          INDEX: 1
+          NO_REFRESH_CHECK: true
+          # 开启 Go 并行编译加速
+          GOFLAGS: "-p=4"
+
+      # 4. 打包产物
+      - name: Compress Packages
+        run: |
+          tar -c -z -f nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz -C bin/packages/${{ matrix.arch }}/nikki .
+
+      # 5. 上传构建结果
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nikki_${{ matrix.arch }}-${{ matrix.branch }}
+          path: nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
