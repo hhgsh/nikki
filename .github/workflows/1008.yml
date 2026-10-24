@@ -1,5 +1,4 @@
 name: test
-
 on:
   workflow_dispatch:
   push:
@@ -10,6 +9,8 @@ jobs:
   release:
     name: ${{ matrix.arch }}-${{ matrix.branch }} release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -20,48 +21,56 @@ jobs:
           - openwrt-25.12
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: checkout
+        uses: actions/checkout@v6
 
-      # 1. 设置 Go 环境与构建缓存
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-          cache: true
-
-      # 2. 显式缓存 OpenWrt SDK 下载目录及 Go 缓存路径
-      - name: Cache Go Build & SDK Dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-            ~/.openwrt-sdk
-          key: ${{ runner.os }}-openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-${{ hashFiles('**/Makefile', '**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-
-
-      # 3. 使用 SDK 编译 IPK
-      - name: Build Packages
+      - name: build
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: nikki
-          PACKAGES: mihomo-alpha mihomo-meta nikki luci-app-nikki
+          # 打包参数中移除了 mihomo-alpha，只保留核心和简体中文语言包可能依赖的包
+          PACKAGES: mihomo-meta nikki luci-app-nikki luci-i18n-nikki-zh-cn
           INDEX: 1
           NO_REFRESH_CHECK: true
-          # 开启 Go 并行编译加速
-          GOFLAGS: "-p=4"
 
-      # 4. 打包产物
-      - name: Compress Packages
+      # 精准清理：排除 mihomo-alpha 以及除简体中文外的其他语言包
+      - name: clean unwanted packages
+        run: |
+          PKGS_DIR="bin/packages/${{ matrix.arch }}/nikki"
+          if [ -d "$PKGS_DIR" ]; then
+            # 1. 删除除 zh-cn 之外的其他所有 luci-i18n 语言包（如 ru, zh-tw 等）
+            find "$PKGS_DIR" -name "luci-i18n-nikki-*.apk" ! -name "*zh-cn*" -delete
+            find "$PKGS_DIR" -name "luci-i18n-nikki-*.ipk" ! -name "*zh-cn*" -delete
+            
+            # 2. 删除 mihomo-alpha 包
+            rm -f "$PKGS_DIR"/mihomo-alpha*.apk "$PKGS_DIR"/mihomo-alpha*.ipk
+          fi
+
+      - name: compress
         run: |
           tar -c -z -f nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz -C bin/packages/${{ matrix.arch }}/nikki .
 
-      # 5. 上传构建结果
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      # 从编译生成的 package 文件名中动态提取 luci-app-nikki 版本号
+      - name: Set Release Tag
+        id: release_tag
+        run: |
+          # 获取生成的 luci-app-nikki 包文件名并解析版本号
+          FILE=$(ls bin/packages/${{ matrix.arch }}/nikki/luci-app-nikki* 2>/dev/null | head -n 1)
+          if [ -n "$FILE" ]; then
+            # 兼容 .ipk 和 .apk 两种文件命名格式
+            VERSION=$(basename "$FILE" | sed -E 's/^luci-app-nikki[_-]//; s/\.(ipk|apk)$//; s/_[^_]+$//')
+            echo "tag_name=v${VERSION}" >> $GITHUB_OUTPUT
+          else
+            echo "tag_name=build-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify Tag Name
+        run: echo "Generated tag name is ${{ steps.release_tag.outputs.tag_name }}"
+
+      - name: upload to release
+        uses: softprops/action-gh-release@v2
         with:
-          name: nikki_${{ matrix.arch }}-${{ matrix.branch }}
-          path: nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
+          files: nikki_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
+          tag_name: ${{ steps.release_tag.outputs.tag_name }}
+          generate_release_notes: true
